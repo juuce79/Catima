@@ -29,6 +29,12 @@ interface CardAdapterCallbacks {
     fun onRowLongClicked(inputPosition: Int)
 }
 
+// TODO: Uncomment and use this once `ManageGroupCursorAdapter` and `LoyaltyCardCursorAdapter`
+//  have been converted to Kotlin.
+//class ManageGroupActivity : CatimaAppCompatActivity(), ManageGroupCursorAdapter.CardAdapterListener {
+
+// TODO: Use this until `ManageGroupCursorAdapter` and `LoyaltyCardCursorAdapter` have been
+//  converted to Kotlin.
 class ManageGroupActivity : CatimaAppCompatActivity(), CardAdapterCallbacks {
     private lateinit var binding: ActivityManageGroupBinding
     private lateinit var mDatabase: SQLiteDatabase
