@@ -1,241 +1,257 @@
-package protect.card_locker;
+package protect.card_locker
 
-import android.content.Intent;
-import android.database.sqlite.SQLiteDatabase;
-import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
-import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.View;
-import android.widget.EditText;
-import android.widget.TextView;
-import android.widget.Toast;
+import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
+import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.widget.Toolbar
+import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import java.util.ArrayList
+import java.util.HashMap
+import protect.card_locker.databinding.ActivityManageGroupBinding
 
-import androidx.activity.OnBackPressedCallback;
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.widget.Toolbar;
-import androidx.recyclerview.widget.RecyclerView;
+// TODO: Workaround until `ManageGroupCursorAdapter` and `LoyaltyCardCursorAdapter` have been
+//  converted to Kotlin.
+interface CardAdapterCallbacks {
+    fun onRowClicked(inputPosition: Int)
+    fun onRowLongClicked(inputPosition: Int)
+}
 
-import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
+class ManageGroupActivity : CatimaAppCompatActivity(), CardAdapterCallbacks {
+    private lateinit var binding: ActivityManageGroupBinding
+    private lateinit var mDatabase: SQLiteDatabase
+    private lateinit var mAdapter: ManageGroupCursorAdapter
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+    private companion object {
+        private const val SAVE_INSTANCE_ADAPTER_STATE = "adapterState"
+        private const val SAVE_INSTANCE_CURRENT_GROUP_NAME = "currentGroupName"
+    }
 
-import protect.card_locker.databinding.ActivityManageGroupBinding;
+    var mGroup: Group? = null
+    private lateinit var mCardList: RecyclerView
+    private lateinit var noGroupCardsText: TextView
+    private lateinit var mGroupNameText: EditText
 
-public class ManageGroupActivity extends CatimaAppCompatActivity implements ManageGroupCursorAdapter.CardAdapterListener {
-    private ActivityManageGroupBinding binding;
-    private SQLiteDatabase mDatabase;
-    private ManageGroupCursorAdapter mAdapter;
+    private var mGroupNameNotInUse: Boolean = true
 
-    private final String SAVE_INSTANCE_ADAPTER_STATE = "adapterState";
-    private final String SAVE_INSTANCE_CURRENT_GROUP_NAME = "currentGroupName";
+    override fun onCreate(inputSavedInstanceState: Bundle?) {
+        super.onCreate(inputSavedInstanceState)
+        binding = ActivityManageGroupBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        val toolbar = binding.toolbar
+        setSupportActionBar(toolbar)
 
-    protected Group mGroup = null;
-    private RecyclerView mCardList;
-    private TextView noGroupCardsText;
-    private EditText mGroupNameText;
+        mDatabase = DBHelper(this).writableDatabase
 
-    private boolean mGroupNameNotInUse;
+        noGroupCardsText = binding.include.noGroupCardsText
+        mCardList = binding.include.list
+        val saveButton = binding.fabSave
 
-    @Override
-    protected void onCreate(Bundle inputSavedInstanceState) {
-        super.onCreate(inputSavedInstanceState);
-        binding = ActivityManageGroupBinding.inflate(getLayoutInflater());
-        setContentView(binding.getRoot());
-        Toolbar toolbar = binding.toolbar;
-        setSupportActionBar(toolbar);
+        mGroupNameText = binding.editTextGroupName
 
-        mDatabase = new DBHelper(this).getWritableDatabase();
+        mGroupNameText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {}
 
-        noGroupCardsText = binding.include.noGroupCardsText;
-        mCardList = binding.include.list;
-        FloatingActionButton saveButton = binding.fabSave;
+            override fun onTextChanged(s: CharSequence, start: Int, before: Int, count: Int) {}
 
-        mGroupNameText = binding.editTextGroupName;
-
-        mGroupNameText.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                mGroupNameNotInUse = true;
-                mGroupNameText.setError(null);
-                String currentGroupName = mGroupNameText.getText().toString().trim();
-                if (currentGroupName.length() == 0) {
-                    mGroupNameText.setError(getResources().getText(R.string.group_name_is_empty));
-                    return;
+            override fun afterTextChanged(s: Editable) {
+                mGroupNameNotInUse = true
+                mGroupNameText.error = null
+                val currentGroupName = mGroupNameText.text.toString().trim()
+                if (currentGroupName.isEmpty()) {
+                    mGroupNameText.error = resources.getText(R.string.group_name_is_empty)
+                    return
                 }
-                if (!mGroup._id.equals(currentGroupName)) {
+                if (mGroup?._id != currentGroupName) {
                     if (DBHelper.getGroup(mDatabase, currentGroupName) != null) {
-                        mGroupNameNotInUse = false;
-                        mGroupNameText.setError(getResources().getText(R.string.group_name_already_in_use));
+                        mGroupNameNotInUse = false
+                        mGroupNameText.error = resources.getText(R.string.group_name_already_in_use)
                     } else {
-                        mGroupNameNotInUse = true;
+                        mGroupNameNotInUse = true
                     }
                 }
             }
-        });
+        })
 
-        Intent intent = getIntent();
-        String groupId = intent.getStringExtra("group");
-        if (groupId == null) {
-            throw (new IllegalArgumentException("this activity expects a group loaded into it's intent"));
-        }
-        Log.d("groupId", "groupId: " + groupId);
-        mGroup = DBHelper.getGroup(mDatabase, groupId);
-        if (mGroup == null) {
-            throw (new IllegalArgumentException("cannot load group " + groupId + " from database"));
-        }
-        mGroupNameText.setText(mGroup._id);
-        setTitle(getString(R.string.editGroup, mGroup._id));
-        mAdapter = new ManageGroupCursorAdapter(this, null, this, mGroup, null);
-        mCardList.setAdapter(mAdapter);
-        registerForContextMenu(mCardList);
+        val intent = intent
+        val groupId = intent.getStringExtra("group")
+            ?: throw IllegalArgumentException("this activity expects a group loaded into it's intent")
+
+        Log.d("groupId", "groupId: $groupId")
+        mGroup = DBHelper.getGroup(mDatabase, groupId)
+            ?: throw IllegalArgumentException("cannot load group $groupId from database")
+
+        mGroupNameText.setText(mGroup?._id)
+        setTitle(getString(R.string.editGroup, mGroup?._id))
+
+        // TODO: Uncomment and use this once `ManageGroupCursorAdapter` and
+        //  `LoyaltyCardCursorAdapter` have been converted to Kotlin.
+//        mAdapter = ManageGroupCursorAdapter(this, null, this, mGroup, null)
+//        mCardList.adapter = mAdapter
+
+        // TODO: Use this until `ManageGroupCursorAdapter` and `LoyaltyCardCursorAdapter` have been
+        //  converted to Kotlin.
+        createAdapter()
+
+        registerForContextMenu(mCardList)
 
         if (inputSavedInstanceState != null) {
-            mAdapter.importInGroupState(integerArrayToAdapterState(inputSavedInstanceState.getIntegerArrayList(SAVE_INSTANCE_ADAPTER_STATE)));
-            mGroupNameText.setText(inputSavedInstanceState.getString(SAVE_INSTANCE_CURRENT_GROUP_NAME));
+            mAdapter.importInGroupState(integerArrayToAdapterState(inputSavedInstanceState.getIntegerArrayList(SAVE_INSTANCE_ADAPTER_STATE)))
+            mGroupNameText.setText(inputSavedInstanceState.getString(SAVE_INSTANCE_CURRENT_GROUP_NAME))
         }
 
-        enableToolbarBackButton();
+        enableToolbarBackButton()
 
-        saveButton.setOnClickListener(v -> {
-            String currentGroupName = mGroupNameText.getText().toString().trim();
-            if (!currentGroupName.equals(mGroup._id)) {
-                if (currentGroupName.length() == 0) {
-                    Toast.makeText(getApplicationContext(), R.string.group_name_is_empty, Toast.LENGTH_SHORT).show();
-                    return;
+        saveButton.setOnClickListener { v ->
+            val currentGroupName = mGroupNameText.text.toString().trim()
+            if (currentGroupName != mGroup?._id) {
+                if (currentGroupName.isEmpty()) {
+                    Toast.makeText(applicationContext, R.string.group_name_is_empty, Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
                 }
                 if (!mGroupNameNotInUse) {
-                    Toast.makeText(getApplicationContext(), R.string.group_name_already_in_use, Toast.LENGTH_SHORT).show();
-                    return;
+                    Toast.makeText(applicationContext, R.string.group_name_already_in_use, Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
                 }
             }
 
-            mAdapter.commitToDatabase();
-            if (!currentGroupName.equals(mGroup._id)) {
-                DBHelper.updateGroup(mDatabase, mGroup._id, currentGroupName);
+            mAdapter.commitToDatabase()
+            if (currentGroupName != mGroup?._id) {
+                DBHelper.updateGroup(mDatabase, mGroup?._id ?: "", currentGroupName)
             }
-            Toast.makeText(getApplicationContext(), R.string.group_updated, Toast.LENGTH_SHORT).show();
-            finish();
-        });
+            Toast.makeText(applicationContext, R.string.group_updated, Toast.LENGTH_SHORT).show()
+            finish()
+        }
         // this setText is here because content_main.xml is reused from main activity
-        noGroupCardsText.setText(getResources().getText(R.string.noGiftCardsGroup));
-        updateLoyaltyCardList();
+        noGroupCardsText.setText(resources.getText(R.string.noGiftCardsGroup))
+        updateLoyaltyCardList()
 
-        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                leaveWithoutSaving();
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                leaveWithoutSaving()
             }
-        });
+        })
     }
 
-    private ArrayList<Integer> adapterStateToIntegerArray(HashMap<Integer, Boolean> adapterState) {
-        ArrayList<Integer> ret = new ArrayList<>(adapterState.size() * 2);
-        for (Map.Entry<Integer, Boolean> entry : adapterState.entrySet()) {
-            ret.add(entry.getKey());
-            ret.add(entry.getValue() ? 1 : 0);
+    private fun adapterStateToIntegerArray(adapterState: HashMap<Int, Boolean>): ArrayList<Int> {
+        val ret = ArrayList<Int>(adapterState.size * 2)
+        for (entry in adapterState) {
+            ret.add(entry.key)
+            ret.add(if (entry.value) 1 else 0)
         }
-        return ret;
+        return ret
     }
 
-    private HashMap<Integer, Boolean> integerArrayToAdapterState(ArrayList<Integer> in) {
-        HashMap<Integer, Boolean> ret = new HashMap<>();
-        if (in.size() % 2 != 0) {
-            throw (new RuntimeException("failed restoring adapterState from integer array list"));
-        }
-        for (int i = 0; i < in.size(); i += 2) {
-            ret.put(in.get(i), in.get(i + 1) == 1);
-        }
-        return ret;
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu inputMenu) {
-        getMenuInflater().inflate(R.menu.card_details_menu, inputMenu);
-
-        return super.onCreateOptionsMenu(inputMenu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem inputItem) {
-        int id = inputItem.getItemId();
-
-        if (id == R.id.action_display_options) {
-            mAdapter.showDisplayOptionsDialog();
-            invalidateOptionsMenu();
-
-            return true;
+    private fun integerArrayToAdapterState(input: ArrayList<Int>?): HashMap<Int, Boolean> {
+        val ret = HashMap<Int, Boolean>()
+        if (input == null || input.size % 2 != 0) {
+            if (input != null) {
+                throw RuntimeException("failed restoring adapterState from integer array list")
+            }
+            return ret
         }
 
-        return super.onOptionsItemSelected(inputItem);
+        for (i in 0 until input.size step 2) {
+            ret[input[i]] = input[i + 1] == 1
+        }
+        return ret
     }
 
-    @Override
-    protected void onSaveInstanceState(@NonNull Bundle outState) {
-        super.onSaveInstanceState(outState);
-
-        outState.putIntegerArrayList(SAVE_INSTANCE_ADAPTER_STATE, adapterStateToIntegerArray(mAdapter.exportInGroupState()));
-        outState.putString(SAVE_INSTANCE_CURRENT_GROUP_NAME, mGroupNameText.getText().toString());
+    override fun onCreateOptionsMenu(inputMenu: Menu): Boolean {
+        menuInflater.inflate(R.menu.card_details_menu, inputMenu)
+        return super.onCreateOptionsMenu(inputMenu)
     }
 
-    private void updateLoyaltyCardList() {
-        mAdapter.swapCursor(DBHelper.getLoyaltyCardCursor(mDatabase));
-
-        if (mAdapter.getItemCount() == 0) {
-            mCardList.setVisibility(View.GONE);
-            noGroupCardsText.setVisibility(View.VISIBLE);
-        } else {
-            mCardList.setVisibility(View.VISIBLE);
-            noGroupCardsText.setVisibility(View.GONE);
+    override fun onOptionsItemSelected(inputItem: MenuItem): Boolean {
+        return when (inputItem.itemId) {
+            R.id.action_display_options -> {
+                mAdapter.showDisplayOptionsDialog()
+                invalidateOptionsMenu()
+                true
+            }
+            else -> super.onOptionsItemSelected(inputItem)
         }
     }
 
-    private void leaveWithoutSaving() {
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+
+        outState.putIntegerArrayList(SAVE_INSTANCE_ADAPTER_STATE, adapterStateToIntegerArray(mAdapter.exportInGroupState()))
+        outState.putString(SAVE_INSTANCE_CURRENT_GROUP_NAME, mGroupNameText.text.toString())
+    }
+
+    private fun updateLoyaltyCardList() {
+        mAdapter.swapCursor(DBHelper.getLoyaltyCardCursor(mDatabase))
+
+        when (mAdapter.itemCount) {
+            0 -> {
+                mCardList.visibility = View.GONE
+                noGroupCardsText.visibility = View.VISIBLE
+            }
+            else -> {
+                mCardList.visibility = View.VISIBLE
+                noGroupCardsText.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun leaveWithoutSaving() {
         if (hasChanged()) {
-            AlertDialog.Builder builder = new MaterialAlertDialogBuilder(ManageGroupActivity.this);
-            builder.setTitle(R.string.leaveWithoutSaveTitle);
-            builder.setMessage(R.string.leaveWithoutSaveConfirmation);
-            builder.setPositiveButton(R.string.confirm, (dialog, which) -> finish());
-            builder.setNegativeButton(R.string.cancel, (dialog, which) -> dialog.dismiss());
-            AlertDialog dialog = builder.create();
-            dialog.show();
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.leaveWithoutSaveTitle)
+                .setMessage(R.string.leaveWithoutSaveConfirmation)
+                .setPositiveButton(R.string.confirm) { _, _ -> finish() }
+                .setNegativeButton(R.string.cancel) { dialog, _ -> dialog.dismiss() }
+                .create()
+                .show()
         } else {
-            finish();
+            finish()
         }
     }
 
-    @Override
-    public boolean onSupportNavigateUp() {
-        getOnBackPressedDispatcher().onBackPressed();
-        return true;
+    override fun onSupportNavigateUp(): Boolean {
+        onBackPressedDispatcher.onBackPressed()
+        return true
     }
 
-    private boolean hasChanged() {
-        return mAdapter.hasChanged() || !mGroup._id.equals(mGroupNameText.getText().toString().trim());
+    private fun hasChanged(): Boolean {
+        return mAdapter.hasChanged() || mGroup?._id != mGroupNameText.text.toString().trim()
     }
 
-    @Override
-    public void onRowLongClicked(int inputPosition) {
-        mAdapter.toggleSelection(inputPosition);
+    // TODO: This is a workaround until the `ManageGroupCursorAdapter` and `LoyaltyCardCursorAdapter`
+    //  are converted to Kotlin.
+    private fun createAdapter() {
+        val adapterListener = object : LoyaltyCardCursorAdapter.CardAdapterListener {
+            override fun onRowClicked(inputPosition: Int) {
+                this@ManageGroupActivity.onRowClicked(inputPosition)
+            }
+
+            override fun onRowLongClicked(inputPosition: Int) {
+                this@ManageGroupActivity.onRowLongClicked(inputPosition)
+            }
+        }
+
+        mAdapter = ManageGroupCursorAdapter(this, null, adapterListener, mGroup, null)
+        mCardList.adapter = mAdapter
     }
 
-    @Override
-    public void onRowClicked(int inputPosition) {
-        mAdapter.toggleSelection(inputPosition);
+    override fun onRowLongClicked(inputPosition: Int) {
+        mAdapter.toggleSelection(inputPosition)
+    }
 
+    override fun onRowClicked(inputPosition: Int) {
+        mAdapter.toggleSelection(inputPosition)
     }
 }
